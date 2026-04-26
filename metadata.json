@@ -1,0 +1,8 @@
+{
+    "uuid": "focus-guard-app-locker@neptron.pl",
+    "name": "Focus Guard - App Locker",
+    "description": "Block distracting applications to maintain focus. Mark any app as blocked — its windows will be automatically minimized and it will stay hidden until you explicitly unblock it. Perfect for staying concentrated on your current work.",
+    "shell-version": ["45", "46", "47", "48", "49"],
+    "version": 1,
+    "settings-schema": "org.gnome.shell.extensions.focus-guard"
+}

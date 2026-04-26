@@ -1,0 +1,23 @@
+/* Focus Guard — App Locker
+ * GNOME Shell Extension Stylesheet
+ */
+
+.focus-guard-icon {
+    padding: 0 2px;
+}
+
+.focus-guard-icon.active {
+    color: #f87171;
+}
+
+.focus-guard-count {
+    font-size: 0.9em;
+    font-weight: bold;
+    padding-left: 3px;
+    color: #f87171;
+}
+
+.focus-guard-header {
+    font-weight: bold;
+    font-size: 1em;
+}

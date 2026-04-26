@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.gnome.shell.extensions.focus-guard"
+          path="/org/gnome/shell/extensions/focus-guard/">
+    <key name="blocked-apps" type="as">
+      <default>[]</default>
+      <summary>Blocked application IDs</summary>
+      <description>List of application desktop IDs that are blocked. Format: "app.id.desktop|App Name"</description>
+    </key>
+  </schema>
+</schemalist>
