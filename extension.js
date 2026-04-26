@@ -170,10 +170,7 @@ class FocusGuardIndicator extends PanelMenu.Button {
 
 function _isSystemApp(app) {
     const id = app.get_id() || '';
-    return id.startsWith('org.gnome.') ||
-           id === 'gnome-shell' ||
-           id === '' ||
-           id.startsWith('gnome-');
+    return id === '' || id === 'gnome-shell';
 }
 
 function _getAppFromWindow(window) {
@@ -205,9 +202,19 @@ export default class FocusGuardExtension extends Extension {
         Main.panel.addToStatusArea('focus-guard', this._indicator);
         this._indicator.refresh();
 
-        // Minimize blocked app windows on creation
+        // New window created (app launched)
         this._windowCreatedId = global.display.connect('window-created', (_d, window) => {
             this._onWindowCreated(window);
+        });
+
+        // Window mapped/restored from minimized state (e.g. clicked in taskbar)
+        this._mapId = global.window_manager.connect('map', (_wm, actor) => {
+            this._onWindowMapped(actor.meta_window);
+        });
+
+        // Focus changed — last line of defence if the window slips through
+        this._focusId = global.display.connect('notify::focus-window', () => {
+            this._onFocusChanged();
         });
 
         // Minimize any already-open windows of blocked apps
@@ -221,6 +228,14 @@ export default class FocusGuardExtension extends Extension {
         if (this._windowCreatedId) {
             global.display.disconnect(this._windowCreatedId);
             this._windowCreatedId = null;
+        }
+        if (this._mapId) {
+            global.window_manager.disconnect(this._mapId);
+            this._mapId = null;
+        }
+        if (this._focusId) {
+            global.display.disconnect(this._focusId);
+            this._focusId = null;
         }
 
         this._unpatchWindowMenu();
@@ -286,27 +301,44 @@ export default class FocusGuardExtension extends Extension {
     // ── Window monitoring ─────────────────────────────────────────────────
 
     _onWindowCreated(window) {
-        // Wait briefly for the window actor and app tracker to be ready
-        const timeoutId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 80, () => {
+        GLib.timeout_add(GLib.PRIORITY_DEFAULT, 80, () => {
             try {
                 if (!window.get_compositor_private()) return GLib.SOURCE_REMOVE;
-                const app = _getAppFromWindow(window);
-                if (app && this.isBlocked(app.get_id())) {
-                    if (window.can_minimize()) {
-                        window.minimize();
-                    }
-                    Main.notify(
-                        'Focus Guard',
-                        `Zablokowano uruchomienie: ${app.get_name()}`
-                    );
-                }
-            } catch (_e) {
-                // Window may have been closed already
-            }
+                this._blockWindowIfNeeded(window);
+            } catch (_e) { /* window may have been closed */ }
             return GLib.SOURCE_REMOVE;
         });
-        // Ensure timeout is cleaned up if extension is disabled quickly
-        void timeoutId;
+    }
+
+    _onWindowMapped(window) {
+        if (!window) return;
+        // Fired when a window is shown or restored from minimized state
+        GLib.timeout_add(GLib.PRIORITY_DEFAULT, 50, () => {
+            try {
+                this._blockWindowIfNeeded(window);
+            } catch (_e) { /* ignore */ }
+            return GLib.SOURCE_REMOVE;
+        });
+    }
+
+    _onFocusChanged() {
+        const window = global.display.get_focus_window();
+        if (!window) return;
+        GLib.timeout_add(GLib.PRIORITY_DEFAULT, 50, () => {
+            try {
+                this._blockWindowIfNeeded(window);
+            } catch (_e) { /* ignore */ }
+            return GLib.SOURCE_REMOVE;
+        });
+    }
+
+    _blockWindowIfNeeded(window) {
+        const app = _getAppFromWindow(window);
+        if (!app || !this.isBlocked(app.get_id())) return;
+        if (!window.minimized && window.can_minimize()) {
+            window.minimize();
+            Main.notify('Focus Guard', `Zablokowano: ${app.get_name()}`);
+        }
     }
 
     _minimizeAppWindows(appId) {
@@ -366,35 +398,47 @@ export default class FocusGuardExtension extends Extension {
             const ext = this;
 
             manager.showWindowMenuForWindow = function(window, type, rect) {
-                ext._savedShowWindowMenu.call(this, window, type, rect);
-                try {
-                    // After the original call, the menu is the last entry in _manager._menus
-                    const menus = this._manager?._menus;
-                    if (!menus || menus.length === 0) return;
+                const app = _getAppFromWindow(window);
 
-                    const entry = menus[menus.length - 1];
-                    const menu = entry?.menu ?? entry;
-                    if (!menu || typeof menu.addMenuItem !== 'function') return;
+                if (app) {
+                    // Intercept PopupMenu.open() just for this one call so we
+                    // can add our items before the menu is rendered on screen.
+                    const origOpen = PopupMenu.PopupMenu.prototype.open;
+                    let injected = false;
 
-                    const app = _getAppFromWindow(window);
-                    if (!app) return;
+                    PopupMenu.PopupMenu.prototype.open = function(animate) {
+                        if (!injected) {
+                            injected = true;
+                            PopupMenu.PopupMenu.prototype.open = origOpen;
+                            try {
+                                const appId = app.get_id();
+                                const appName = app.get_name();
+                                this.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+                                if (ext.isBlocked(appId)) {
+                                    const item = new PopupMenu.PopupMenuItem(
+                                        `Odblokuj ${appName} (Focus Guard)`
+                                    );
+                                    item.connect('activate', () => ext.unblockApp(appId));
+                                    this.addMenuItem(item);
+                                } else {
+                                    const item = new PopupMenu.PopupMenuItem(
+                                        `Zablokuj ${appName} (Focus Guard)`
+                                    );
+                                    item.connect('activate', () => ext.blockApp(appId, appName));
+                                    this.addMenuItem(item);
+                                }
+                            } catch (_e) { /* ignore */ }
+                        }
+                        origOpen.call(this, animate);
+                    };
 
-                    const appId = app.get_id();
-                    const appName = app.get_name();
-
-                    menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
-
-                    if (ext.isBlocked(appId)) {
-                        const item = new PopupMenu.PopupMenuItem(`Odblokuj ${appName} (Focus Guard)`);
-                        item.connect('activate', () => ext.unblockApp(appId));
-                        menu.addMenuItem(item);
-                    } else {
-                        const item = new PopupMenu.PopupMenuItem(`Zablokuj ${appName} (Focus Guard)`);
-                        item.connect('activate', () => ext.blockApp(appId, appName));
-                        menu.addMenuItem(item);
+                    try {
+                        ext._savedShowWindowMenu.call(this, window, type, rect);
+                    } finally {
+                        PopupMenu.PopupMenu.prototype.open = origOpen;
                     }
-                } catch (_e) {
-                    // Window menu integration failed silently — panel menu still works
+                } else {
+                    ext._savedShowWindowMenu.call(this, window, type, rect);
                 }
             };
 
