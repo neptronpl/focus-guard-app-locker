@@ -68,23 +68,29 @@ class FocusGuardIndicator extends PanelMenu.Button {
         this.menu.addMenuItem(header);
         this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 
-        // Block current focused app
-        this._blockCurrentItem = new PopupMenu.PopupMenuItem('Zablokuj bieżącą aplikację');
-        this._blockCurrentItem.connect('activate', () => this._ext.blockCurrentApp());
-        this.menu.addMenuItem(this._blockCurrentItem);
+        // "Block" submenu
+        this._blockSubMenu = new PopupMenu.PopupSubMenuMenuItem('Zablokuj');
+        this.menu.addMenuItem(this._blockSubMenu);
 
         this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 
-        // Dynamically populated list of blocked apps
-        this._blockedSection = new PopupMenu.PopupMenuSection();
-        this.menu.addMenuItem(this._blockedSection);
+        // "Unblock" submenu
+        this._unblockSubMenu = new PopupMenu.PopupSubMenuMenuItem('Odblokuj');
+        this.menu.addMenuItem(this._unblockSubMenu);
 
-        this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+        // Action separator — hidden when neither action item is visible
+        this._actionSeparator = new PopupMenu.PopupSeparatorMenuItem();
+        this.menu.addMenuItem(this._actionSeparator);
 
-        // Unblock all
+        // "Unblock all" — shown when ≥1 app is blocked
         this._unblockAllItem = new PopupMenu.PopupMenuItem('Odblokuj wszystkie');
         this._unblockAllItem.connect('activate', () => this._ext.unblockAllApps());
         this.menu.addMenuItem(this._unblockAllItem);
+
+        // "Restore last" — shown when no apps blocked but snapshot exists
+        this._restoreItem = new PopupMenu.PopupMenuItem('');
+        this._restoreItem.connect('activate', () => this._ext.restoreLastBlockedApps());
+        this.menu.addMenuItem(this._restoreItem);
 
         this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 
@@ -97,60 +103,50 @@ class FocusGuardIndicator extends PanelMenu.Button {
     _refreshMenu() {
         if (this._destroyed) return;
 
-        this._blockedSection.removeAll();
+        // ── "Zablokuj" submenu ──────────────────────────────────────────────
+        this._blockSubMenu.menu.removeAll();
+        const runningApps = Shell.AppSystem.get_default().get_running()
+            .filter(app => app.get_id() && !_isSystemApp(app) && !this._ext.isBlocked(app.get_id()))
+            .sort((a, b) => a.get_name().localeCompare(b.get_name()));
 
+        if (runningApps.length === 0) {
+            const empty = new PopupMenu.PopupMenuItem('Brak aktywnych aplikacji', {reactive: false});
+            empty.label.style = 'font-style: italic; color: alpha(currentColor, 0.5);';
+            this._blockSubMenu.menu.addMenuItem(empty);
+        } else {
+            for (const app of runningApps) {
+                const item = new PopupMenu.PopupMenuItem(app.get_name());
+                item.connect('activate', () => this._ext.blockApp(app.get_id(), app.get_name()));
+                this._blockSubMenu.menu.addMenuItem(item);
+            }
+        }
+
+        // ── "Odblokuj" submenu ──────────────────────────────────────────────
+        this._unblockSubMenu.menu.removeAll();
         const blocked = this._ext.getBlockedApps();
 
         if (blocked.size === 0) {
             const empty = new PopupMenu.PopupMenuItem('Brak zablokowanych aplikacji', {reactive: false});
             empty.label.style = 'font-style: italic; color: alpha(currentColor, 0.5);';
-            this._blockedSection.addMenuItem(empty);
-            try { this._unblockAllItem.setSensitive(false); } catch (_e) {}
+            this._unblockSubMenu.menu.addMenuItem(empty);
         } else {
-            try { this._unblockAllItem.setSensitive(true); } catch (_e) {}
             for (const [appId, appName] of blocked) {
-                const item = new PopupMenu.PopupMenuItem(`\u{1F6AB} ${appName}`);
+                const item = new PopupMenu.PopupMenuItem(appName);
                 item.connect('activate', () => this._ext.unblockApp(appId));
-                this._blockedSection.addMenuItem(item);
+                this._unblockSubMenu.menu.addMenuItem(item);
             }
         }
 
-        // Restore item — dynamically added when snapshot exists
-        const last = this._ext.getLastBlockedApps();
-        if (last.size > 0) {
-            this._blockedSection.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
-            const names = [...last.values()].join(', ');
-            const restoreItem = new PopupMenu.PopupMenuItem(
-                `↩ Przywróć ostatnio blokowane (${last.size}): ${names}`
-            );
-            restoreItem.connect('activate', () => this._ext.restoreLastBlockedApps());
-            this._blockedSection.addMenuItem(restoreItem);
-        }
+        // ── Action items (mutually exclusive) ───────────────────────────────
+        const hasBlocked = blocked.size > 0;
+        const snapshot = this._ext.getLastBlockedApps();
+        const hasSnapshot = snapshot.size > 0;
 
-        this._updateBlockCurrentItem();
-    }
-
-    _updateBlockCurrentItem() {
-        if (this._destroyed) return;
-        const win = global.display.get_focus_window();
-        if (win) {
-            const tracker = Shell.WindowTracker.get_default();
-            const app = tracker.get_window_app(win);
-            if (app && app.get_id() && !_isSystemApp(app)) {
-                const appId = app.get_id();
-                const appName = app.get_name();
-                if (this._ext.isBlocked(appId)) {
-                    this._blockCurrentItem.label.text = `✓ ${appName} (już zablokowana)`;
-                    this._blockCurrentItem.setSensitive(false);
-                } else {
-                    this._blockCurrentItem.label.text = `Zablokuj: ${appName}`;
-                    this._blockCurrentItem.setSensitive(true);
-                }
-                return;
-            }
-        }
-        this._blockCurrentItem.label.text = 'Zablokuj bieżącą aplikację';
-        this._blockCurrentItem.setSensitive(false);
+        this._actionSeparator.visible = hasBlocked || hasSnapshot;
+        this._unblockAllItem.visible = hasBlocked;
+        this._restoreItem.visible = !hasBlocked && hasSnapshot;
+        if (!hasBlocked && hasSnapshot)
+            this._restoreItem.label.text = `↩ Przywróć ostatnio blokowane (${snapshot.size})`;
     }
 
     _updateIcon() {
@@ -298,20 +294,6 @@ export default class FocusGuardExtension extends Extension {
         } else {
             Main.notify('Focus Guard', 'Brak zablokowanych aplikacji.');
         }
-    }
-
-    blockCurrentApp() {
-        const win = global.display.get_focus_window();
-        if (!win) {
-            Main.notify('Focus Guard', 'Brak aktywnego okna.');
-            return;
-        }
-        const app = _getAppFromWindow(win);
-        if (!app) {
-            Main.notify('Focus Guard', 'Nie można zidentyfikować aplikacji.');
-            return;
-        }
-        this.blockApp(app.get_id(), app.get_name());
     }
 
     blockApp(appId, appName) {
