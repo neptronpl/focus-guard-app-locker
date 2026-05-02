@@ -36,6 +36,7 @@ class FocusGuardIndicator extends PanelMenu.Button {
     _init(ext) {
         super._init(0.0, 'Focus Guard');
         this._ext = ext;
+        this._destroyed = false;
 
         const box = new St.BoxLayout({style_class: 'panel-status-menu-box'});
 
@@ -56,7 +57,7 @@ class FocusGuardIndicator extends PanelMenu.Button {
         this._buildMenu();
 
         this._openStateId = this.menu.connect('open-state-changed', (_menu, open) => {
-            if (open) this._refreshMenu();
+            if (open) this.refresh();
         });
     }
 
@@ -84,14 +85,20 @@ class FocusGuardIndicator extends PanelMenu.Button {
 
         // Unblock all
         this._unblockAllItem = new PopupMenu.PopupMenuItem('Odblokuj wszystkie');
-        this._unblockAllItem.connect('activate', () => {
-            this._ext.unblockAllApps();
-            this._refreshMenu();
-        });
+        this._unblockAllItem.connect('activate', () => this._ext.unblockAllApps());
         this.menu.addMenuItem(this._unblockAllItem);
+
+        this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+
+        // Preferences
+        const prefsItem = new PopupMenu.PopupMenuItem('Preferencje');
+        prefsItem.connect('activate', () => this._ext.openPreferences());
+        this.menu.addMenuItem(prefsItem);
     }
 
     _refreshMenu() {
+        if (this._destroyed) return;
+
         this._blockedSection.removeAll();
 
         const blocked = this._ext.getBlockedApps();
@@ -100,24 +107,33 @@ class FocusGuardIndicator extends PanelMenu.Button {
             const empty = new PopupMenu.PopupMenuItem('Brak zablokowanych aplikacji', {reactive: false});
             empty.label.style = 'font-style: italic; color: alpha(currentColor, 0.5);';
             this._blockedSection.addMenuItem(empty);
-            this._unblockAllItem.setSensitive(false);
+            try { this._unblockAllItem.setSensitive(false); } catch (_e) {}
         } else {
-            this._unblockAllItem.setSensitive(true);
+            try { this._unblockAllItem.setSensitive(true); } catch (_e) {}
             for (const [appId, appName] of blocked) {
                 const item = new PopupMenu.PopupMenuItem(`\u{1F6AB} ${appName}`);
-                item.connect('activate', () => {
-                    this._ext.unblockApp(appId);
-                    this._refreshMenu();
-                });
+                item.connect('activate', () => this._ext.unblockApp(appId));
                 this._blockedSection.addMenuItem(item);
             }
         }
 
+        // Restore item — dynamically added when snapshot exists
+        const last = this._ext.getLastBlockedApps();
+        if (last.size > 0) {
+            this._blockedSection.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+            const names = [...last.values()].join(', ');
+            const restoreItem = new PopupMenu.PopupMenuItem(
+                `↩ Przywróć ostatnio blokowane (${last.size}): ${names}`
+            );
+            restoreItem.connect('activate', () => this._ext.restoreLastBlockedApps());
+            this._blockedSection.addMenuItem(restoreItem);
+        }
+
         this._updateBlockCurrentItem();
-        this._updateIcon();
     }
 
     _updateBlockCurrentItem() {
+        if (this._destroyed) return;
         const win = global.display.get_focus_window();
         if (win) {
             const tracker = Shell.WindowTracker.get_default();
@@ -140,6 +156,7 @@ class FocusGuardIndicator extends PanelMenu.Button {
     }
 
     _updateIcon() {
+        if (this._destroyed) return;
         const count = this._ext.getBlockedApps().size;
         if (count > 0) {
             this._icon.icon_name = 'security-low-symbolic';
@@ -153,11 +170,13 @@ class FocusGuardIndicator extends PanelMenu.Button {
     }
 
     refresh() {
+        if (this._destroyed) return;
         this._refreshMenu();
         this._updateIcon();
     }
 
     destroy() {
+        this._destroyed = true;
         if (this._openStateId) {
             this.menu.disconnect(this._openStateId);
             this._openStateId = null;
@@ -188,7 +207,8 @@ export default class FocusGuardExtension extends Extension {
         super(metadata);
         this._indicator = null;
         this._settings = null;
-        this._blockedApps = new Map();   // appId → appName
+        this._blockedApps = new Map();      // appId → appName
+        this._lastBlockedApps = new Map();  // snapshot saved on "unblock all"
         this._windowCreatedId = null;
         this._savedShowWindowMenu = null;
         this._patchedManager = null;
@@ -197,10 +217,19 @@ export default class FocusGuardExtension extends Extension {
     enable() {
         this._settings = this.getSettings('org.gnome.shell.extensions.focus-guard');
         this._loadBlockedApps();
+        this._loadLastBlockedApps();
 
         this._indicator = new FocusGuardIndicator(this);
         Main.panel.addToStatusArea('focus-guard', this._indicator);
         this._indicator.refresh();
+
+        Main.wm.addKeybinding(
+            'toggle-shortcut',
+            this._settings,
+            Meta.KeyBindingFlags.IGNORE_AUTOREPEAT,
+            Shell.ActionMode.NORMAL,
+            () => this.quickToggle()
+        );
 
         // New window created (app launched)
         this._windowCreatedId = global.display.connect('window-created', (_d, window) => {
@@ -217,7 +246,7 @@ export default class FocusGuardExtension extends Extension {
             this._onFocusChanged();
         });
 
-        // Minimize any already-open windows of blocked apps
+        // Minimize already-open windows of blocked apps on startup
         this._minimizeAllBlockedWindows();
 
         // Patch the WM window right-click menu
@@ -225,6 +254,8 @@ export default class FocusGuardExtension extends Extension {
     }
 
     disable() {
+        Main.wm.removeKeybinding('toggle-shortcut');
+
         if (this._windowCreatedId) {
             global.display.disconnect(this._windowCreatedId);
             this._windowCreatedId = null;
@@ -247,6 +278,7 @@ export default class FocusGuardExtension extends Extension {
 
         this._settings = null;
         this._blockedApps.clear();
+        this._lastBlockedApps.clear();
     }
 
     // ── Public API ────────────────────────────────────────────────────────
@@ -255,8 +287,22 @@ export default class FocusGuardExtension extends Extension {
         return this._blockedApps;
     }
 
+    getLastBlockedApps() {
+        return this._lastBlockedApps;
+    }
+
     isBlocked(appId) {
         return this._blockedApps.has(appId);
+    }
+
+    quickToggle() {
+        if (this._blockedApps.size > 0) {
+            this.unblockAllApps();
+        } else if (this._lastBlockedApps.size > 0) {
+            this.restoreLastBlockedApps();
+        } else {
+            Main.notify('Focus Guard', 'Brak zablokowanych aplikacji.');
+        }
     }
 
     blockCurrentApp() {
@@ -292,10 +338,30 @@ export default class FocusGuardExtension extends Extension {
     }
 
     unblockAllApps() {
+        if (this._blockedApps.size > 0) {
+            this._lastBlockedApps = new Map(this._blockedApps);
+            this._saveLastBlockedApps();
+        }
         this._blockedApps.clear();
         this._saveBlockedApps();
         this._indicator?.refresh();
         Main.notify('Focus Guard', 'Wszystkie aplikacje odblokowane.');
+    }
+
+    restoreLastBlockedApps() {
+        if (this._lastBlockedApps.size === 0) return;
+        const count = this._lastBlockedApps.size;
+        for (const [appId, appName] of this._lastBlockedApps)
+            this._blockedApps.set(appId, appName);
+        this._saveBlockedApps();
+        this._lastBlockedApps.clear();
+        this._saveLastBlockedApps();
+        GLib.timeout_add(GLib.PRIORITY_DEFAULT, 150, () => {
+            this._minimizeAllBlockedWindows();
+            return GLib.SOURCE_REMOVE;
+        });
+        this._indicator?.refresh();
+        Main.notify('Focus Guard', `Przywrócono blokowanie (${count} aplikacji).`);
     }
 
     // ── Window monitoring ─────────────────────────────────────────────────
@@ -381,10 +447,25 @@ export default class FocusGuardExtension extends Extension {
 
     _saveBlockedApps() {
         const entries = [];
-        for (const [appId, appName] of this._blockedApps) {
+        for (const [appId, appName] of this._blockedApps)
             entries.push(`${appId}|${appName}`);
-        }
         this._settings.set_strv('blocked-apps', entries);
+    }
+
+    _loadLastBlockedApps() {
+        this._lastBlockedApps.clear();
+        for (const entry of this._settings.get_strv('last-blocked-apps')) {
+            const sep = entry.indexOf('|');
+            if (sep !== -1)
+                this._lastBlockedApps.set(entry.substring(0, sep), entry.substring(sep + 1));
+        }
+    }
+
+    _saveLastBlockedApps() {
+        const entries = [];
+        for (const [appId, appName] of this._lastBlockedApps)
+            entries.push(`${appId}|${appName}`);
+        this._settings.set_strv('last-blocked-apps', entries);
     }
 
     // ── Window right-click menu integration ───────────────────────────────

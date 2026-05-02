@@ -3,7 +3,7 @@
 > A GNOME Shell extension that blocks distracting applications so you can stay focused on your work.
 
 ![GNOME Shell](https://img.shields.io/badge/GNOME%20Shell-45%2B-blue)
-![Version](https://img.shields.io/badge/version-1.0.0-green)
+![Version](https://img.shields.io/badge/version-1.2.0-green)
 ![License](https://img.shields.io/badge/license-GPL--2.0%2B-orange)
 
 ## What it does
@@ -17,10 +17,13 @@ Focus Guard lets you mark any application as **blocked**. Once blocked:
 ## Features
 
 - **Panel indicator** — shows how many apps are currently blocked; click to manage the list
+- **Configurable keyboard shortcut** — smart toggle: if apps are blocked it unblocks all (saves a snapshot); if the list is empty but a snapshot exists it restores it
 - **Block current app** — one click to block whichever app is in focus
-- **Per-app unblock** — unblock individual apps or clear all at once
+- **Per-app unblock** — click any blocked app in the panel menu to unblock it individually
+- **Unblock all** — clear the entire blocked list at once (snapshot saved automatically)
+- **Restore last blocked** — quickly restore the previous set of blocked apps after an "unblock all"
 - **Window right-click menu** — block/unblock directly from the window context menu
-- **Persistent** — blocked apps are remembered across sessions via GSettings
+- **Persistent** — blocked apps list and snapshot are remembered across sessions via GSettings
 - **Lightweight** — no background processes, pure GNOME Shell signals
 
 ## Installation
@@ -49,9 +52,12 @@ gnome-extensions enable focus-guard-app-locker@neptron.pl
 
 ## Usage
 
-1. **Block an app** — focus the app you want to block, then click the shield icon in the top panel and choose *Block: [App Name]*
-2. **Unblock an app** — click the panel icon and select the app from the blocked list, or right-click any window and choose *Unblock [App Name]*
-3. **Unblock everything** — open the panel menu and click *Unblock all*
+1. **Block an app** — focus the app you want to block, then click the shield icon in the top panel and choose *Zablokuj: [App Name]*; alternatively right-click its window and choose *Zablokuj [App Name] (Focus Guard)*
+2. **Unblock an app** — click the panel icon and select the app from the blocked list to unblock it, or right-click the window and choose *Odblokuj [App Name] (Focus Guard)*
+3. **Unblock everything** — open the panel menu and click *Odblokuj wszystkie*; the current list is saved as a snapshot so you can restore it later
+4. **Restore last blocked** — after an "unblock all", use *↩ Przywróć ostatnio blokowane* in the panel menu to bring back the previous set
+5. **Keyboard shortcut** — if apps are blocked, the shortcut unblocks all; if the list is empty but a snapshot exists, it restores the snapshot
+6. **Set keyboard shortcut** — open extension preferences (*Preferencje* in the panel menu) and click *Ustaw skrót*
 
 ## Requirements
 
