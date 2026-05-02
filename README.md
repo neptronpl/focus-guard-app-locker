@@ -3,7 +3,7 @@
 > A GNOME Shell extension that blocks distracting applications so you can stay focused on your work.
 
 ![GNOME Shell](https://img.shields.io/badge/GNOME%20Shell-45%2B-blue)
-![Version](https://img.shields.io/badge/version-1.2.0-green)
+![Version](https://img.shields.io/badge/version-1.3.0-green)
 ![License](https://img.shields.io/badge/license-GPL--2.0%2B-orange)
 
 ## What it does

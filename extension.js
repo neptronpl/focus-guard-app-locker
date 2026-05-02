@@ -18,7 +18,6 @@
 
 import St from 'gi://St';
 import GObject from 'gi://GObject';
-import Gio from 'gi://Gio';
 import Meta from 'gi://Meta';
 import Shell from 'gi://Shell';
 import Clutter from 'gi://Clutter';
@@ -26,7 +25,6 @@ import GLib from 'gi://GLib';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
-import * as WindowMenu from 'resource:///org/gnome/shell/ui/windowMenu.js';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 
 // ─── Panel Indicator ────────────────────────────────────────────────────────
@@ -209,12 +207,12 @@ export default class FocusGuardExtension extends Extension {
         this._settings = null;
         this._blockedApps = new Map();      // appId → appName
         this._lastBlockedApps = new Map();  // snapshot saved on "unblock all"
+        this._enabled = false;
         this._windowCreatedId = null;
-        this._savedShowWindowMenu = null;
-        this._patchedManager = null;
     }
 
     enable() {
+        this._enabled = true;
         this._settings = this.getSettings('org.gnome.shell.extensions.focus-guard');
         this._loadBlockedApps();
         this._loadLastBlockedApps();
@@ -249,11 +247,10 @@ export default class FocusGuardExtension extends Extension {
         // Minimize already-open windows of blocked apps on startup
         this._minimizeAllBlockedWindows();
 
-        // Patch the WM window right-click menu
-        this._patchWindowMenu();
     }
 
     disable() {
+        this._enabled = false;
         Main.wm.removeKeybinding('toggle-shortcut');
 
         if (this._windowCreatedId) {
@@ -268,8 +265,6 @@ export default class FocusGuardExtension extends Extension {
             global.display.disconnect(this._focusId);
             this._focusId = null;
         }
-
-        this._unpatchWindowMenu();
 
         if (this._indicator) {
             this._indicator.destroy();
@@ -357,6 +352,7 @@ export default class FocusGuardExtension extends Extension {
         this._lastBlockedApps.clear();
         this._saveLastBlockedApps();
         GLib.timeout_add(GLib.PRIORITY_DEFAULT, 150, () => {
+            if (!this._enabled) return GLib.SOURCE_REMOVE;
             this._minimizeAllBlockedWindows();
             return GLib.SOURCE_REMOVE;
         });
@@ -368,6 +364,7 @@ export default class FocusGuardExtension extends Extension {
 
     _onWindowCreated(window) {
         GLib.timeout_add(GLib.PRIORITY_DEFAULT, 80, () => {
+            if (!this._enabled) return GLib.SOURCE_REMOVE;
             try {
                 if (!window.get_compositor_private()) return GLib.SOURCE_REMOVE;
                 this._blockWindowIfNeeded(window);
@@ -378,8 +375,8 @@ export default class FocusGuardExtension extends Extension {
 
     _onWindowMapped(window) {
         if (!window) return;
-        // Fired when a window is shown or restored from minimized state
         GLib.timeout_add(GLib.PRIORITY_DEFAULT, 50, () => {
+            if (!this._enabled) return GLib.SOURCE_REMOVE;
             try {
                 this._blockWindowIfNeeded(window);
             } catch (_e) { /* ignore */ }
@@ -391,6 +388,7 @@ export default class FocusGuardExtension extends Extension {
         const window = global.display.get_focus_window();
         if (!window) return;
         GLib.timeout_add(GLib.PRIORITY_DEFAULT, 50, () => {
+            if (!this._enabled) return GLib.SOURCE_REMOVE;
             try {
                 this._blockWindowIfNeeded(window);
             } catch (_e) { /* ignore */ }
@@ -401,10 +399,8 @@ export default class FocusGuardExtension extends Extension {
     _blockWindowIfNeeded(window) {
         const app = _getAppFromWindow(window);
         if (!app || !this.isBlocked(app.get_id())) return;
-        if (!window.minimized && window.can_minimize()) {
+        if (!window.minimized && window.can_minimize())
             window.minimize();
-            Main.notify('Focus Guard', `Zablokowano: ${app.get_name()}`);
-        }
     }
 
     _minimizeAppWindows(appId) {
@@ -468,72 +464,4 @@ export default class FocusGuardExtension extends Extension {
         this._settings.set_strv('last-blocked-apps', entries);
     }
 
-    // ── Window right-click menu integration ───────────────────────────────
-
-    _patchWindowMenu() {
-        try {
-            const manager = Main.wm._windowMenuManager;
-            if (!manager) return;
-
-            this._savedShowWindowMenu = manager.showWindowMenuForWindow;
-            const ext = this;
-
-            manager.showWindowMenuForWindow = function(window, type, rect) {
-                const app = _getAppFromWindow(window);
-
-                if (app) {
-                    // Intercept PopupMenu.open() just for this one call so we
-                    // can add our items before the menu is rendered on screen.
-                    const origOpen = PopupMenu.PopupMenu.prototype.open;
-                    let injected = false;
-
-                    PopupMenu.PopupMenu.prototype.open = function(animate) {
-                        if (!injected) {
-                            injected = true;
-                            PopupMenu.PopupMenu.prototype.open = origOpen;
-                            try {
-                                const appId = app.get_id();
-                                const appName = app.get_name();
-                                this.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
-                                if (ext.isBlocked(appId)) {
-                                    const item = new PopupMenu.PopupMenuItem(
-                                        `Odblokuj ${appName} (Focus Guard)`
-                                    );
-                                    item.connect('activate', () => ext.unblockApp(appId));
-                                    this.addMenuItem(item);
-                                } else {
-                                    const item = new PopupMenu.PopupMenuItem(
-                                        `Zablokuj ${appName} (Focus Guard)`
-                                    );
-                                    item.connect('activate', () => ext.blockApp(appId, appName));
-                                    this.addMenuItem(item);
-                                }
-                            } catch (_e) { /* ignore */ }
-                        }
-                        origOpen.call(this, animate);
-                    };
-
-                    try {
-                        ext._savedShowWindowMenu.call(this, window, type, rect);
-                    } finally {
-                        PopupMenu.PopupMenu.prototype.open = origOpen;
-                    }
-                } else {
-                    ext._savedShowWindowMenu.call(this, window, type, rect);
-                }
-            };
-
-            this._patchedManager = manager;
-        } catch (_e) {
-            // Could not patch window menu; panel menu remains fully functional
-        }
-    }
-
-    _unpatchWindowMenu() {
-        if (this._patchedManager && this._savedShowWindowMenu) {
-            this._patchedManager.showWindowMenuForWindow = this._savedShowWindowMenu;
-        }
-        this._patchedManager = null;
-        this._savedShowWindowMenu = null;
-    }
 }

@@ -12,11 +12,6 @@
       <summary>Last blocked application IDs</summary>
       <description>Snapshot of blocked apps saved when "Unblock all" is used, so the list can be restored.</description>
     </key>
-    <key name="blocking-enabled" type="b">
-      <default>true</default>
-      <summary>Blocking enabled</summary>
-      <description>Whether app blocking is currently active. When false, the blocked apps list is preserved but no windows are minimized.</description>
-    </key>
     <key name="toggle-shortcut" type="as">
       <default>[]</default>
       <summary>Toggle shortcut</summary>
