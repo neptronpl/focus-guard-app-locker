@@ -14,31 +14,32 @@ import {ExtensionPreferences} from 'resource:///org/gnome/Shell/Extensions/js/ex
 
 export default class FocusGuardPreferences extends ExtensionPreferences {
     fillPreferencesWindow(window) {
+        const _ = this.gettext.bind(this);
         const settings = this.getSettings('org.gnome.shell.extensions.focus-guard');
 
         const page = new Adw.PreferencesPage({
-            title: 'Ustawienia',
+            title: _('Settings'),
             icon_name: 'preferences-system-symbolic',
         });
         window.add(page);
 
         const group = new Adw.PreferencesGroup({
-            title: 'Skróty klawiaturowe',
-            description: 'Przypisz skrót klawiaturowy do przełączania blokowania.',
+            title: _('Keyboard shortcuts'),
+            description: _('Set a keyboard shortcut for toggling blocking.'),
         });
         page.add(group);
 
-        group.add(this._buildShortcutRow(settings, window));
+        group.add(this._buildShortcutRow(settings, window, _));
     }
 
-    _buildShortcutRow(settings, prefWindow) {
+    _buildShortcutRow(settings, prefWindow, _) {
         const row = new Adw.ActionRow({
-            title: 'Przełącz blokowanie',
-            subtitle: 'Włącza lub wyłącza blokowanie wszystkich aplikacji z listy',
+            title: _('Toggle blocking'),
+            subtitle: _('Enables or disables blocking for all apps in the list'),
         });
 
         const shortcutLabel = new Gtk.ShortcutLabel({
-            disabled_text: 'Nie ustawiono',
+            disabled_text: _('Not set'),
             valign: Gtk.Align.CENTER,
         });
 
@@ -52,7 +53,7 @@ export default class FocusGuardPreferences extends ExtensionPreferences {
             icon_name: 'edit-clear-symbolic',
             valign: Gtk.Align.CENTER,
             css_classes: ['flat'],
-            tooltip_text: 'Wyczyść skrót',
+            tooltip_text: _('Clear shortcut'),
         });
         clearBtn.connect('clicked', () => {
             settings.set_strv('toggle-shortcut', []);
@@ -60,7 +61,7 @@ export default class FocusGuardPreferences extends ExtensionPreferences {
         });
 
         const setBtn = new Gtk.Button({
-            label: 'Ustaw skrót',
+            label: _('Set shortcut'),
             valign: Gtk.Align.CENTER,
             css_classes: ['suggested-action'],
         });
@@ -79,7 +80,7 @@ export default class FocusGuardPreferences extends ExtensionPreferences {
                 prefWindow.remove_controller(keyController);
                 keyController = null;
             }
-            setBtn.label = 'Ustaw skrót';
+            setBtn.label = _('Set shortcut');
             setBtn.css_classes = ['suggested-action'];
             setBtn.sensitive = true;
         };
@@ -87,7 +88,7 @@ export default class FocusGuardPreferences extends ExtensionPreferences {
         setBtn.connect('clicked', () => {
             if (isRecording) return;
             isRecording = true;
-            setBtn.label = 'Naciśnij skrót…';
+            setBtn.label = _('Press shortcut…');
             setBtn.css_classes = ['destructive-action'];
             setBtn.sensitive = false;
 

@@ -25,7 +25,7 @@ import GLib from 'gi://GLib';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
-import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
+import {Extension, gettext as _} from 'resource:///org/gnome/shell/extensions/extension.js';
 
 // ─── Panel Indicator ────────────────────────────────────────────────────────
 
@@ -69,13 +69,13 @@ class FocusGuardIndicator extends PanelMenu.Button {
         this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 
         // "Block" submenu
-        this._blockSubMenu = new PopupMenu.PopupSubMenuMenuItem('Zablokuj');
+        this._blockSubMenu = new PopupMenu.PopupSubMenuMenuItem(_('Block'));
         this.menu.addMenuItem(this._blockSubMenu);
 
         this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 
         // "Unblock" submenu
-        this._unblockSubMenu = new PopupMenu.PopupSubMenuMenuItem('Odblokuj');
+        this._unblockSubMenu = new PopupMenu.PopupSubMenuMenuItem(_('Unblock'));
         this.menu.addMenuItem(this._unblockSubMenu);
 
         // Action separator — hidden when neither action item is visible
@@ -83,7 +83,7 @@ class FocusGuardIndicator extends PanelMenu.Button {
         this.menu.addMenuItem(this._actionSeparator);
 
         // "Unblock all" — shown when ≥1 app is blocked
-        this._unblockAllItem = new PopupMenu.PopupMenuItem('Odblokuj wszystkie');
+        this._unblockAllItem = new PopupMenu.PopupMenuItem(_('Unblock all'));
         this._unblockAllItem.connect('activate', () => this._ext.unblockAllApps());
         this.menu.addMenuItem(this._unblockAllItem);
 
@@ -95,7 +95,7 @@ class FocusGuardIndicator extends PanelMenu.Button {
         this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 
         // Preferences
-        const prefsItem = new PopupMenu.PopupMenuItem('Preferencje');
+        const prefsItem = new PopupMenu.PopupMenuItem(_('Preferences'));
         prefsItem.connect('activate', () => this._ext.openPreferences());
         this.menu.addMenuItem(prefsItem);
     }
@@ -110,7 +110,7 @@ class FocusGuardIndicator extends PanelMenu.Button {
             .sort((a, b) => a.get_name().localeCompare(b.get_name()));
 
         if (runningApps.length === 0) {
-            const empty = new PopupMenu.PopupMenuItem('Brak aktywnych aplikacji', {reactive: false});
+            const empty = new PopupMenu.PopupMenuItem(_('No active applications'), {reactive: false});
             empty.label.style = 'font-style: italic; color: alpha(currentColor, 0.5);';
             this._blockSubMenu.menu.addMenuItem(empty);
         } else {
@@ -126,7 +126,7 @@ class FocusGuardIndicator extends PanelMenu.Button {
         const blocked = this._ext.getBlockedApps();
 
         if (blocked.size === 0) {
-            const empty = new PopupMenu.PopupMenuItem('Brak zablokowanych aplikacji', {reactive: false});
+            const empty = new PopupMenu.PopupMenuItem(_('No blocked applications'), {reactive: false});
             empty.label.style = 'font-style: italic; color: alpha(currentColor, 0.5);';
             this._unblockSubMenu.menu.addMenuItem(empty);
         } else {
@@ -146,7 +146,7 @@ class FocusGuardIndicator extends PanelMenu.Button {
         this._unblockAllItem.visible = hasBlocked;
         this._restoreItem.visible = !hasBlocked && hasSnapshot;
         if (!hasBlocked && hasSnapshot)
-            this._restoreItem.label.text = `↩ Przywróć ostatnio blokowane (${snapshot.size})`;
+            this._restoreItem.label.text = _('↩ Restore last blocked (%d)').replace('%d', String(snapshot.size));
     }
 
     _updateIcon() {
@@ -292,7 +292,7 @@ export default class FocusGuardExtension extends Extension {
         } else if (this._lastBlockedApps.size > 0) {
             this.restoreLastBlockedApps();
         } else {
-            Main.notify('Focus Guard', 'Brak zablokowanych aplikacji.');
+            Main.notify('Focus Guard', _('No blocked applications.'));
         }
     }
 
@@ -302,7 +302,7 @@ export default class FocusGuardExtension extends Extension {
         this._saveBlockedApps();
         this._minimizeAppWindows(appId);
         this._indicator?.refresh();
-        Main.notify('Focus Guard', `Zablokowano: ${appName || appId}`);
+        Main.notify('Focus Guard', _('Blocked: %s').replace('%s', appName || appId));
     }
 
     unblockApp(appId) {
@@ -311,7 +311,7 @@ export default class FocusGuardExtension extends Extension {
         this._blockedApps.delete(appId);
         this._saveBlockedApps();
         this._indicator?.refresh();
-        Main.notify('Focus Guard', `Odblokowano: ${appName}`);
+        Main.notify('Focus Guard', _('Unblocked: %s').replace('%s', appName));
     }
 
     unblockAllApps() {
@@ -322,7 +322,7 @@ export default class FocusGuardExtension extends Extension {
         this._blockedApps.clear();
         this._saveBlockedApps();
         this._indicator?.refresh();
-        Main.notify('Focus Guard', 'Wszystkie aplikacje odblokowane.');
+        Main.notify('Focus Guard', _('All applications unblocked.'));
     }
 
     restoreLastBlockedApps() {
@@ -339,7 +339,7 @@ export default class FocusGuardExtension extends Extension {
             return GLib.SOURCE_REMOVE;
         });
         this._indicator?.refresh();
-        Main.notify('Focus Guard', `Przywrócono blokowanie (${count} aplikacji).`);
+        Main.notify('Focus Guard', _('Blocking restored (%d applications).').replace('%d', String(count)));
     }
 
     // ── Window monitoring ─────────────────────────────────────────────────
