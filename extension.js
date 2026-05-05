@@ -204,6 +204,7 @@ export default class FocusGuardExtension extends Extension {
         this._blockedApps = new Map();      // appId → appName
         this._lastBlockedApps = new Map();  // snapshot saved on "unblock all"
         this._enabled = false;
+        this._timeoutIds = [];
         this._windowCreatedId = null;
     }
 
@@ -247,6 +248,9 @@ export default class FocusGuardExtension extends Extension {
 
     disable() {
         this._enabled = false;
+        for (const id of this._timeoutIds)
+            GLib.Source.remove(id);
+        this._timeoutIds = [];
         Main.wm.removeKeybinding('toggle-shortcut');
 
         if (this._windowCreatedId) {
@@ -333,11 +337,10 @@ export default class FocusGuardExtension extends Extension {
         this._saveBlockedApps();
         this._lastBlockedApps.clear();
         this._saveLastBlockedApps();
-        GLib.timeout_add(GLib.PRIORITY_DEFAULT, 150, () => {
-            if (!this._enabled) return GLib.SOURCE_REMOVE;
+        this._timeoutIds.push(GLib.timeout_add(GLib.PRIORITY_DEFAULT, 150, () => {
             this._minimizeAllBlockedWindows();
             return GLib.SOURCE_REMOVE;
-        });
+        }));
         this._indicator?.refresh();
         Main.notify('Focus Guard', _('Blocking restored (%d applications).').replace('%d', String(count)));
     }
@@ -345,37 +348,34 @@ export default class FocusGuardExtension extends Extension {
     // ── Window monitoring ─────────────────────────────────────────────────
 
     _onWindowCreated(window) {
-        GLib.timeout_add(GLib.PRIORITY_DEFAULT, 80, () => {
-            if (!this._enabled) return GLib.SOURCE_REMOVE;
+        this._timeoutIds.push(GLib.timeout_add(GLib.PRIORITY_DEFAULT, 80, () => {
             try {
                 if (!window.get_compositor_private()) return GLib.SOURCE_REMOVE;
                 this._blockWindowIfNeeded(window);
             } catch (_e) { /* window may have been closed */ }
             return GLib.SOURCE_REMOVE;
-        });
+        }));
     }
 
     _onWindowMapped(window) {
         if (!window) return;
-        GLib.timeout_add(GLib.PRIORITY_DEFAULT, 50, () => {
-            if (!this._enabled) return GLib.SOURCE_REMOVE;
+        this._timeoutIds.push(GLib.timeout_add(GLib.PRIORITY_DEFAULT, 50, () => {
             try {
                 this._blockWindowIfNeeded(window);
             } catch (_e) { /* ignore */ }
             return GLib.SOURCE_REMOVE;
-        });
+        }));
     }
 
     _onFocusChanged() {
         const window = global.display.get_focus_window();
         if (!window) return;
-        GLib.timeout_add(GLib.PRIORITY_DEFAULT, 50, () => {
-            if (!this._enabled) return GLib.SOURCE_REMOVE;
+        this._timeoutIds.push(GLib.timeout_add(GLib.PRIORITY_DEFAULT, 50, () => {
             try {
                 this._blockWindowIfNeeded(window);
             } catch (_e) { /* ignore */ }
             return GLib.SOURCE_REMOVE;
-        });
+        }));
     }
 
     _blockWindowIfNeeded(window) {
